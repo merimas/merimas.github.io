@@ -1,0 +1,163 @@
+---
+title: "<i>Vibrio anguillarum</i> genes presence/absence heatmap, using NB10 as ref, example with PF4-E2-R4"
+author: "Meril Massot"
+date: "3/18/2022"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+setwd("/Users/merilm/Documents/Travail/Rwork/cnrs/Vibrio_anguillarum_NCBI_dataset/data")
+library(ape)
+library(ggplot2)
+library(dplyr)    # alternatively, this also loads %>%
+library(tidyverse)
+library(ggrepel)
+library(grid)
+library(gridExtra)
+library(RColorBrewer)
+library("cowplot")
+library(ggiraph)
+
+
+```
+
+I used the Prokka output csv file of both NB10 and PF4-E2-R4 strains, 
+- extracted the gene name and the position on strains chromosomes
+- manual curation for RNAs and transposase family genes
+
+Using NB10 as the reference genome, I mapped the gene content of PF4-E2-R4 on each NB10 chromosome.  
+
+NB: these are interactive graphs. The name of genes will appear if your mouse is over it.
+```{r cars, echo = FALSE, include = FALSE}
+## 0. Manual curation to avoid R errors
+# remove the fasta part of the gff3 file manually 
+# change "," for "." in the score column
+
+## 1. Load the gff file
+gff<-read.gff(
+  "GCF_003390675.1_ASM339067v1_genomic.fna.gff",  
+  GFF3 = TRUE)
+
+data<-gff[,c(1, 4, 5, 7, 9)]
+data$attributes<-gsub(";eC_number=","", data$attributes)
+
+## 2. Separate the attributes colum and extract the name of the product genes in one column named 'gene_name'
+data2 <- data %>% 
+  separate(attributes, into = c("ID", "Name", "db_xref", "gene", "inference", 
+                                "locus_tag", "product"), sep = ";", convert = TRUE)
+data2$gene<-gsub('"','', data2$gene)
+data2$product<-gsub('"','', data2$product)
+
+data3<-data2
+data3$Name<-ifelse(grepl("Aragorn",data3$Name)==TRUE, data3$gene, data3$Name)               # RNAs 
+data3$Name<-ifelse(grepl("note",data3$gene)==TRUE, data3$gene, data3$Name)                  # hypothetical proteins with annotation
+data3$Name<-ifelse(grepl("transposase",data3$gene)==TRUE, data3$gene, data3$Name)           # transposases
+data3$Name<-ifelse(grepl("transposase",data3$inference)==TRUE, data3$inference, data3$Name) # transposases
+data3$Name<-ifelse(grepl("Prodigal",data3$Name)==TRUE, 'hypothetical protein', data3$Name)
+
+data3$Name<-ifelse(data3$Name=="hypothetical protein" & data3$gene != "product=hypothetical protein", data3$gene, data3$Name)
+
+data3$Name<-ifelse(grepl("db_xref",data3$Name)==TRUE, data3$inference, data3$Name)
+data3$Name<-ifelse(grepl("locus_tag",data3$Name)==TRUE, data3$db_xref, data3$Name)
+
+data3$Name<-gsub('Name=','',data3$Name)
+data3$Name<-gsub('product=','',data3$Name)
+data3$Name<-gsub('note=','',data3$Name)
+data3$Name<-gsub('"','',data3$Name)
+
+data3<-data3[,c(1:6)]
+colnames(data3)<-c("seqid","start","end","strand","ID","gene_name")
+
+data3<-data3[-which(data3$gene_name=="hypothetical protein"),]
+
+NB10<-read.csv2("NB10_coordinates_list_of_genes.csv")
+NB10<-NB10[,-1]
+
+NB10_chr1<-subset(NB10,NB10$NB10_chr=="chromosome_1",select=c(1:12))
+dat1<-merge(NB10_chr1,data3, by="gene_name",all.x=TRUE)
+
+#dat %>% drop_na(NB10_pos_on_seqid)
+dat1$gene_name2<-dat1$gene_name
+dat1$gene_name2<-reorder(dat1$gene_name2,dat1$NB10_start_pos_on_seqid)
+
+NB10_chr2<-subset(NB10,NB10$NB10_chr=="chromosome_2",select=c(1:12))
+dat2<-merge(NB10_chr2,data3, by="gene_name",all.x=TRUE)
+
+dat2$gene_name2<-dat2$gene_name
+dat2$gene_name2<-reorder(dat2$gene_name2,dat2$NB10_start_pos_on_seqid)
+
+```
+
+
+The first figure represents the presence/absence of genes in the PF4-E2-R4 strain. A white tile indicates absence of gene. The genes are colored based on the chromosomic sequence in which it was detected in PF4-E2-R4 (2 sequences were available in this assembly, one per chromosome).
+
+
+```{r, echo =FALSE}
+chr1<-ggplot(data=dat1,aes(x=gene_name2, y=NB10_chr)) +
+  geom_tile_interactive(color="white", aes(tooltip= gene_name2, fill=seqid.y, data_id = seqid.y)) + 
+  scale_x_discrete(position = "top", name="NB10 chromosome I")+ guides(fill='none')+
+  scale_fill_manual(values=c("blue","green"),na.value="white")+
+  #scale_fill_gradient(low="yellow",high="red",na.value="white")+
+  theme(axis.text.x = element_text(angle = 0,hjust=1,size=0,colour = "white"),
+        axis.text.y = element_text(size=0,colour = "white"),
+        axis.title.y = element_text(size=0,colour = "white"),
+        axis.title =element_text(size=15),
+        axis.ticks.y = element_blank())
+
+
+chr2<-ggplot(data=dat2,aes(x=gene_name2, y=NB10_chr)) +
+  geom_tile_interactive(color="white", aes(tooltip= gene_name2, fill=seqid.y, data_id = seqid.y)) + 
+  scale_x_discrete(position = "top", name="NB10 chromosome II")+  guides(fill='none')+
+  scale_y_discrete(labels=c("chromosome II"))+
+  scale_fill_manual(values=c("blue","green"),na.value="white")+
+  theme(axis.text.x = element_text(angle = 0,hjust=1,size=0,colour = "white"),
+        axis.text.y = element_text(size=0,colour = "white"),
+        axis.title.y = element_text(size=0,colour = "white"),
+        axis.title =element_text(size=15),
+        axis.ticks.y = element_blank())
+
+girafe(ggobj = plot_grid(chr1, chr2, ncol=1), width_svg = 8, height_svg = 3)
+
+```
+
+
+
+The second figure also represents the presence/absence of genes in the PF4-E2-R4 strain mapped on the NB10  chromosomes, but colored according to their position in the genome of PF4-E2-R4.
+I thought it would be interesting to check the similarity of the two genomes like you did with lastz but with genes as input.
+
+
+```{r, echo =FALSE}
+chr1<-ggplot(data=dat1,aes(x=gene_name2, y=NB10_chr)) +
+  geom_tile_interactive(color="white", aes(tooltip= gene_name2, fill=start, data_id = seqid.y)) + 
+  scale_x_discrete(position = "top", name="NB10 chromosome I")+  
+  scale_y_discrete(labels=c("chromosome I"))+
+  scale_fill_gradient(low="blue",high="red",na.value="white", name = "gene position on \n PF4-E2-R4 assembly",
+                      breaks=c(0,1000000, 2000000,2765058),labels=c("Minimum",1000000, 2000000,"Maximum"),
+                           limits=c(0,2765058))+
+  theme(axis.text.x = element_text(angle = 0,hjust=1,size=0,colour = "white"),
+        axis.text.y = element_text(size=0,colour = "white"),
+        axis.title.y = element_text(size=0,colour = "white"),
+        axis.title =element_text(size=15),
+        axis.ticks.y = element_blank())
+
+
+
+chr2<-ggplot(data=dat2,aes(x=gene_name2, y=NB10_chr)) +
+  geom_tile_interactive(color="white", aes(tooltip= gene_name2, fill=start, data_id = seqid.y)) + 
+  scale_x_discrete(position = "top", name="NB10 chromosome II")+  
+  scale_y_discrete(labels=c("chromosome II"))+
+  scale_fill_gradient(low="blue",high="red",na.value="white", name = "gene position on \n PF4-E2-R4 assembly",
+                      breaks=c(0,1000000, 2000000,2765058),labels=c("Minimum",1000000, 2000000,"Maximum"),
+                           limits=c(0,2765058))+
+  theme(axis.text.x = element_text(angle = 0,hjust=1,size=0,colour = "white"),
+        axis.text.y = element_text(size=0,colour = "white"),
+        axis.title.y = element_text(size=0,colour = "white"),
+        axis.title =element_text(size=15),
+        axis.ticks.y = element_blank())
+
+girafe(ggobj = plot_grid(chr1, chr2, ncol=1), width_svg = 8, height_svg = 3)
+
+```
+
+
+
